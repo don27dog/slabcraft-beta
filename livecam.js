@@ -8,11 +8,14 @@
 (function(){
 "use strict";
 const $=s=>document.querySelector(s);
-const LEVEL_OK=3;        // degrees from flat that counts as level
-const HOLD_MS=900;       // how long everything must stay good before the photo
+const LEVEL_OK=4;        // degrees from flat that counts as level
+const LEVEL_SOFT=7;      // close enough to level if held steady a little longer
+const HOLD_MS=700;       // how long everything must stay good before the photo
+const SOFT_HOLD_MS=1800; // hold time when only roughly level
+const GRACE_MS=700;      // one missed check doesn't restart the countdown
 const CHECK_MS=250;      // how often to look for the card
 let stream=null,raf=0,onPhoto=null,side="front",tilt=null,goodSince=0,taken=false,orientSeen=false,orientTimer=0;
-let lastCheck=0,card=null,align=null;const small=document.createElement("canvas");
+let lastCheck=0,card=null,align=null,lastGood=0,sm=null;const small=document.createElement("canvas");
 
 function html(){
   if($("#cam"))return;
@@ -35,10 +38,12 @@ function html(){
 }
 function onOrient(e){
   if(e.beta==null||e.gamma==null)return;if(!orientSeen){const b=document.getElementById("camLvlOn");if(b)b.hidden=true;const l=document.getElementById("camLevel");if(l)l.hidden=false}orientSeen=true;
-  tilt={b:e.beta,g:e.gamma,t:Math.hypot(e.beta,e.gamma)};
+  // smooth out hand shake so the bubble and the check don't jitter
+  if(!sm)sm={b:e.beta,g:e.gamma};else{sm.b=sm.b*.75+e.beta*.25;sm.g=sm.g*.75+e.gamma*.25}
+  tilt={b:sm.b,g:sm.g,t:Math.hypot(sm.b,sm.g)};
 }
 async function open(s,cb){
-  html();side=s;onPhoto=cb;taken=false;goodSince=0;tilt=null;orientSeen=false;card=null;align=null;
+  html();side=s;onPhoto=cb;taken=false;goodSince=0;tilt=null;orientSeen=false;card=null;align=null;lastGood=0;sm=null;
   $("#camTitle").textContent=s==="back"?"Back of card":"Front of card";
   $("#camMsg").textContent="Line the card up with the frame";
   // iPhone asks permission for the level; this must happen on the tap
@@ -84,11 +89,11 @@ function checkAlignment(W,H){
   const off=Math.hypot(cx-fcx,cy-fcy)/f.h,size=maj/f.h;
   let msg="";
   if(ang>45)msg="Turn the card upright";
-  else if(size<.78)msg="Move closer";
-  else if(size>1.08)msg="Move back a little";
-  else if(off>.06)msg="Center the card in the frame";
-  else if(ang>4)msg="Straighten the card";
-  align={ok:!msg,msg};
+  else if(size<.72)msg="Move closer";
+  else if(size>1.14)msg="Move back a little";
+  else if(off>.09)msg="Center the card in the frame";
+  else if(ang>7)msg="Straighten the card";
+  align={ok:!msg,msg};if(!msg)lastGood=performance.now();
 }
 function loop(){
   try{draw()}catch(e){try{console.warn("camera overlay",e)}catch(_){}}
@@ -102,17 +107,21 @@ function draw(){
   if(now-lastCheck>CHECK_MS){lastCheck=now;checkAlignment(W,H)}
   const f=frameRect(W,H);
   const levelOk=!orientSeen||(tilt&&tilt.t<LEVEL_OK);
-  const alignOk=!!(align&&align.ok);
-  const allOk=levelOk&&alignOk;
+  const levelSoft=!orientSeen||(tilt&&tilt.t<LEVEL_SOFT);
+  const alignOk=!!(align&&align.ok)||(lastGood&&now-lastGood<GRACE_MS);
+  const allOk=levelSoft&&alignOk;const need=levelOk?HOLD_MS:SOFT_HOLD_MS;
   // dim outside the frame
   x.fillStyle="rgba(0,0,0,.45)";x.beginPath();x.rect(0,0,W,H);x.rect(f.x,f.y,f.w,f.h);x.fill("evenodd");
-  // thirds grid inside the frame
-  x.strokeStyle="rgba(255,255,255,.55)";x.lineWidth=1.2*dpr;x.setLineDash([6*dpr,6*dpr]);
-  for(let i=1;i<3;i++){x.beginPath();x.moveTo(f.x+f.w*i/3,f.y);x.lineTo(f.x+f.w*i/3,f.y+f.h);x.stroke();x.beginPath();x.moveTo(f.x,f.y+f.h*i/3);x.lineTo(f.x+f.w,f.y+f.h*i/3);x.stroke()}
-  x.setLineDash([]);
-  // centre cross
-  x.strokeStyle="rgba(255,255,255,.8)";x.lineWidth=2*dpr;const cx=f.x+f.w/2,cy=f.y+f.h/2,cl=12*dpr;
-  x.beginPath();x.moveTo(cx-cl,cy);x.lineTo(cx+cl,cy);x.moveTo(cx,cy-cl);x.lineTo(cx,cy+cl);x.stroke();
+  // tight grid inside the frame: 6 across, 8 down (square-ish cells on a 5:7 card)
+  x.strokeStyle="rgba(255,255,255,.32)";x.lineWidth=1*dpr;
+  for(let i=1;i<6;i++){if(i===3)continue;const gx=f.x+f.w*i/6;x.beginPath();x.moveTo(gx,f.y);x.lineTo(gx,f.y+f.h);x.stroke()}
+  for(let i=1;i<8;i++){if(i===4)continue;const gy=f.y+f.h*i/8;x.beginPath();x.moveTo(f.x,gy);x.lineTo(f.x+f.w,gy);x.stroke()}
+  // border guide: where a typical printed border sits, to help square the card
+  x.strokeStyle="rgba(120,200,255,.6)";x.setLineDash([5*dpr,5*dpr]);x.strokeRect(f.x+f.w*.06,f.y+f.h*.045,f.w*.88,f.h*.91);x.setLineDash([]);
+  // centre lines, full length
+  const cx=f.x+f.w/2,cy=f.y+f.h/2;
+  x.strokeStyle="rgba(255,255,255,.8)";x.lineWidth=1.6*dpr;
+  x.beginPath();x.moveTo(cx,f.y);x.lineTo(cx,f.y+f.h);x.moveTo(f.x,cy);x.lineTo(f.x+f.w,cy);x.stroke();
   // the card the camera sees
   if(card&&card.quad){x.strokeStyle=alignOk?"rgba(47,211,127,.95)":"rgba(242,169,59,.95)";x.lineWidth=3*dpr;x.beginPath();
     const q=card.quad;x.moveTo(q[0].x,q[0].y);[1,3,2].forEach(i=>x.lineTo(q[i].x,q[i].y));x.closePath();x.stroke()}
@@ -131,11 +140,14 @@ function draw(){
   const msgEl=$("#camMsg"),auto=$("#camAuto").checked;
   if(allOk){
     if(!goodSince)goodSince=now;
-    const left=Math.max(0,HOLD_MS-(now-goodSince));
-    if(auto&&!taken){msgEl.textContent=left>0?"Lined up and level. Hold still…":"Taking photo…";if(left===0)capture(true)}
+    const left=Math.max(0,need-(now-goodSince));
+    if(auto&&!taken){msgEl.textContent=left>0?(levelOk?"Lined up and level. Hold still…":"Almost level. Hold still…"):"Taking photo…";
+      // countdown ring around the shutter
+      const sh=$("#camShot");if(sh)sh.style.boxShadow=`0 0 0 ${3+Math.round(6*(1-left/need))}px #2FD37F`;
+      if(left===0)capture(true)}
     else msgEl.textContent="Lined up and level. Tap the shutter";
   }else{
-    goodSince=0;
+    goodSince=0;{const sh=$("#camShot");if(sh)sh.style.boxShadow=""}
     if(!alignOk)msgEl.textContent=align?align.msg:"Line the card up with the frame";
     else msgEl.textContent=`Level the phone: tilted ${tilt.t.toFixed(1)}°. Center the bubble`;
   }
