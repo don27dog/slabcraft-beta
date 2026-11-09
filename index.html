@@ -218,6 +218,7 @@ details.box[open] summary{margin-bottom:10px}
 .cambar{position:absolute;left:0;right:0;bottom:0;padding:18px 20px calc(22px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;justify-content:space-between;background:linear-gradient(transparent,rgba(0,0,0,.6))}
 .cambtn{color:#fff;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.5);border-radius:999px;padding:8px 14px;font:600 15px var(--f-body);display:flex;gap:6px;align-items:center}
 .cambtn[hidden]{display:none}
+.camlvlbtn{position:absolute;left:50%;transform:translateX(-50%);top:calc(152px + env(safe-area-inset-top,0px));white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
 .shutter{width:76px;height:76px;border-radius:50%;border:5px solid #fff;background:rgba(255,255,255,.25);cursor:pointer}
 .shutter:active{background:#fff}
 .strictbox{display:flex;flex-direction:column;gap:6px}
@@ -725,9 +726,9 @@ input[type=range]{accent-color:var(--accent);width:100%}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="config.js"></script>
-<script src="shim.js"></script>
-<script src="livecam.js"></script>
+<script src="config.js?v=3"></script>
+<script src="shim.js?v=3"></script>
+<script src="livecam.js?v=3"></script>
 <script>
 (function(){
 "use strict";

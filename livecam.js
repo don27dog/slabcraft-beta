@@ -20,6 +20,7 @@ function html(){
   d.innerHTML=`<video id="camVideo" playsinline autoplay muted></video><canvas id="camOverlay"></canvas>
     <div class="camtop"><b id="camTitle">Front</b><span id="camMsg">Line the card up with the frame</span></div>
     <div class="camlevel" id="camLevel" aria-hidden="true"><i></i><span class="bub" id="camBub"></span></div>
+    <button type="button" class="cambtn camlvlbtn" id="camLvlOn" hidden>Tap to turn on the level</button>
     <div class="cambar">
       <button type="button" class="cambtn" id="camClose">Cancel</button>
       <button type="button" class="shutter" id="camShot" aria-label="Take photo"></button>
@@ -27,10 +28,13 @@ function html(){
     </div>`;
   document.body.appendChild(d);
   $("#camClose").addEventListener("click",close);
+  $("#camLvlOn").addEventListener("click",async()=>{
+    try{if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){const r=await DeviceOrientationEvent.requestPermission();if(r!=="granted"){$("#camLvlOn").textContent="Level blocked: allow Motion & Orientation for this site in Settings"}}}catch(_){}
+  });
   $("#camShot").addEventListener("click",()=>capture(false));
 }
 function onOrient(e){
-  if(e.beta==null||e.gamma==null)return;orientSeen=true;
+  if(e.beta==null||e.gamma==null)return;if(!orientSeen){const b=document.getElementById("camLvlOn");if(b)b.hidden=true;const l=document.getElementById("camLevel");if(l)l.hidden=false}orientSeen=true;
   tilt={b:e.beta,g:e.gamma,t:Math.hypot(e.beta,e.gamma)};
 }
 async function open(s,cb){
@@ -40,8 +44,10 @@ async function open(s,cb){
   // iPhone asks permission for the level; this must happen on the tap
   try{if(typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function"){await DeviceOrientationEvent.requestPermission()}}catch(_){}
   window.addEventListener("deviceorientation",onOrient);
-  $("#camLevel").hidden=false;
-  clearTimeout(orientTimer);orientTimer=setTimeout(()=>{if(!orientSeen)$("#camLevel").hidden=true},1500);
+  $("#camLevel").hidden=false;$("#camLvlOn").hidden=true;
+  clearTimeout(orientTimer);orientTimer=setTimeout(()=>{if(!orientSeen){
+    const ios=typeof DeviceOrientationEvent!=="undefined"&&typeof DeviceOrientationEvent.requestPermission==="function";
+    $("#camLevel").hidden=!ios;$("#camLvlOn").hidden=!ios}},1500);
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:3840},height:{ideal:2160}}});
   }catch(e){
@@ -49,8 +55,8 @@ async function open(s,cb){
     alert("The camera couldn't open. Allow camera access for this site in your browser settings. If you opened the link inside another app (like Facebook or Messenger), open it in Chrome or Safari instead.");return;
   }
   const v=$("#camVideo");v.srcObject=stream;$("#cam").hidden=false;document.body.style.overflow="hidden";
+  cancelAnimationFrame(raf);loop();
   try{await v.play()}catch(_){}
-  loop();
 }
 function close(){
   cancelAnimationFrame(raf);window.removeEventListener("deviceorientation",onOrient);clearTimeout(orientTimer);
@@ -85,6 +91,10 @@ function checkAlignment(W,H){
   align={ok:!msg,msg};
 }
 function loop(){
+  try{draw()}catch(e){try{console.warn("camera overlay",e)}catch(_){}}
+  if(stream)raf=requestAnimationFrame(loop);
+}
+function draw(){
   const cv=$("#camOverlay"),r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
   if(cv.width!==Math.round(r.width*dpr)){cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr)}
   const x=cv.getContext("2d"),W=cv.width,H=cv.height;x.clearRect(0,0,W,H);
@@ -129,7 +139,6 @@ function loop(){
     if(!alignOk)msgEl.textContent=align?align.msg:"Line the card up with the frame";
     else msgEl.textContent=`Level the phone: tilted ${tilt.t.toFixed(1)}°. Center the bubble`;
   }
-  raf=requestAnimationFrame(loop);
 }
 async function capture(auto){
   if(taken)return;taken=true;
