@@ -726,9 +726,9 @@ input[type=range]{accent-color:var(--accent);width:100%}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="config.js?v=8"></script>
-<script src="shim.js?v=8"></script>
-<script src="livecam.js?v=8"></script>
+<script src="config.js?v=9"></script>
+<script src="shim.js?v=9"></script>
+<script src="livecam.js?v=9"></script>
 <script>
 (function(){
 "use strict";
@@ -1549,7 +1549,19 @@ function applyResult(){
 }
 let regradeT=null;
 function regrade(){
-  if(!S.raw)return;S.result=buildResult(S.raw);if(!S.isExample)applyResult();renderResult();
+  if(!S.raw)return;S.result=buildResult(S.raw);if(!S.isExample)applyResult();renderResult();trackGrade();
+}
+// beta stats: report each finished grade (sent once things settle, and again if it changes)
+let trackT=null,trackedSig="";
+function trackGrade(){
+  clearTimeout(trackT);trackT=setTimeout(()=>{try{
+    const r=S.result,c=S.card||{};if(!r||S.isExample||!window.SlabTrack)return;
+    const ci=r.centerInfo||{},ct=x=>x?{lr:`${Math.round(Math.max(x.lr,100-x.lr))}/${Math.round(Math.min(x.lr,100-x.lr))}`,tb:`${Math.round(Math.max(x.tb,100-x.tb))}/${Math.round(Math.min(x.tb,100-x.tb))}`,src:String(x.src||"").split(".")[0].slice(0,60)}:null;
+    const d={serial:c.serial||"",card:[c.year,c.brand,c.set,c.player].filter(Boolean).join(" ").slice(0,120),overall:r.overall,front:r.sideOverall.front,back:r.sideOverall.back,
+      centering:r.subs.centering.score,corners:r.subs.corners.score,edges:r.subs.edges.score,surface:r.subs.surface.score,
+      cf:ct(ci.front),cb:ct(ci.back),strict:r.strict,rule:r.rule,flaws:(r.flaws||[]).length,confidence:r.confidence||"",quick:!!S.quickMode};
+    const sig=JSON.stringify(d);if(sig===trackedSig)return;trackedSig=sig;window.SlabTrack("graded",d);
+  }catch(_){}},4000);
 }
 function scheduleRegrade(){if(!S.raw||S.isExample)return;clearTimeout(regradeT);regradeT=setTimeout(regrade,250)}
 
@@ -1569,7 +1581,7 @@ async function runGrade(opts){opts=opts||{};
     const keep=opts.keep&&!S.isExample?{serial:S.card.serial,saved:S.savedId,made:S.labelCreated}:null;
     S.raw=n;S.isExample=false;S.savedId=keep?keep.saved:null;S.labelCreated=keep?keep.made:false;S.result=buildResult(n);
     S.card=Object.assign({},d,{about:S.about||"",serial:keep&&keep.serial?keep.serial:newSerial(),date:new Date().toISOString().slice(0,10)});applyResult();
-    st.hidden=true;renderResult();
+    st.hidden=true;renderResult();trackGrade();
   }catch(e){
     if(e&&e.code==="cancelled"){st.hidden=true}
     else{st.className="status err";st.textContent=ERR[e&&e.code]||ERR.upstream_error}

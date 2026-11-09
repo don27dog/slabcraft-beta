@@ -25,11 +25,11 @@ function testerId(){
   if(!t||t.length<8){const a=new Uint8Array(8);crypto.getRandomValues(a);t=Array.from(a,b=>b.toString(16).padStart(2,"0")).join("");LS.set("slabcraft.tid",t)}
   return t;
 }
-function track(event){
+function track(event,data){
   try{
     if(!CFG.serverUrl)return;
     const h={"content-type":"application/json","x-tester-id":testerId()};const c=LS.get("slabcraft.betaCode");if(c)h["x-beta-code"]=c;
-    fetch(CFG.serverUrl.replace(/\/$/,"")+"/ping",{method:"POST",keepalive:true,headers:h,body:JSON.stringify({event})}).catch(()=>{});
+    fetch(CFG.serverUrl.replace(/\/$/,"")+"/ping",{method:"POST",keepalive:true,headers:h,body:JSON.stringify(data?{event,data}:{event})}).catch(()=>{});
   }catch(_){}
 }
 
@@ -115,4 +115,5 @@ const user={async id(){return "local"},isOwner:()=>true,canEdit:()=>true,can:()=
 const caps={sample,db,downloads,user};
 window.claude={use:async name=>caps[name]||null};
 track("open");
+window.SlabTrack=track;
 })();
