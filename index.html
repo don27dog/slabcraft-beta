@@ -312,16 +312,17 @@ input[type=range]{accent-color:var(--accent);width:100%}
   <section class="panel step" id="s1">
       <div class="stephead"><span class="num">1</span><h2>Photos</h2></div>
       <div class="slots">
-        <label class="slot" id="slot-front">
+        <label class="slot" id="slot-front" data-livetap="g-front">
           <span class="chip tag">Front</span>
           <div class="ph"><b>Add front</b><span class="small muted">Required · tap or drop a photo</span></div>
           <input type="file" id="file-front" accept="image/*">
         </label>
-        <label class="slot" id="slot-back">
+        <label class="slot" id="slot-back" data-livetap="g-back">
           <span class="chip tag">Back</span>
           <div class="ph"><b>Add back</b><span class="small muted">Required · tap or drop a photo</span></div>
           <input type="file" id="file-back" accept="image/*">
         </label>
+        <p class="small muted full2" style="text-align:center">Have a photo already? <a href="#" data-upload="g-front">Upload front</a> · <a href="#" data-upload="g-back">Upload back</a></p>
       </div>
       <div class="camrow">
         <button class="btn primary" type="button" data-live="front">Live camera · front</button>
@@ -512,11 +513,12 @@ input[type=range]{accent-color:var(--accent);width:100%}
       <div class="strictbox"><span class="strictlbl">How hard should the card be graded?</span>
         <div class="seg strictSeg" role="group" aria-label="Grading strictness"><button type="button" data-strict="easy">Easy</button><button type="button" data-strict="standard">Standard</button><button type="button" data-strict="tough">Tough</button><button type="button" data-strict="gem">Gem hunter</button></div>
         <span class="small muted strictNote"></span></div>
-      <p class="tips">Lay the card on a plain dark surface. Use Live camera: hold the phone flat until the bubble turns green and it snaps the photo for you. Pick how hard to grade first. Grading starts by itself once both photos are in.</p>
+      <p class="tips">Lay the card on a plain dark surface. Tap a photo box to open the camera: line the card up with the frame and hold the phone flat until the bubble turns green. It takes the photo for you. Pick how hard to grade first. Grading starts by itself once both photos are in.</p>
       <div class="slots">
         <div class="camrow full2"><button class="btn primary" type="button" data-qlive="front">Live camera · front</button><button class="btn primary" type="button" data-qlive="back">Live camera · back</button></div>
-        <label class="slot" id="qslot-front"><span class="chip tag">Front</span><div class="ph"><b>Front photo</b><span class="small muted">Tap to take or choose</span></div><input type="file" id="qfile-front" accept="image/*"></label>
-        <label class="slot" id="qslot-back"><span class="chip tag">Back</span><div class="ph"><b>Back photo</b><span class="small muted">Tap to take or choose</span></div><input type="file" id="qfile-back" accept="image/*"></label>
+        <label class="slot" id="qslot-front" data-livetap="q-front"><span class="chip tag">Front</span><div class="ph"><b>Front photo</b><span class="small muted">Tap to open the camera</span></div><input type="file" id="qfile-front" accept="image/*"></label>
+        <label class="slot" id="qslot-back" data-livetap="q-back"><span class="chip tag">Back</span><div class="ph"><b>Back photo</b><span class="small muted">Tap to open the camera</span></div><input type="file" id="qfile-back" accept="image/*"></label>
+        <p class="small muted full2" style="text-align:center">Have a photo already? <a href="#" data-upload="q-front">Upload front</a> · <a href="#" data-upload="q-back">Upload back</a></p>
       </div>
       <ol class="qsteps" id="qsteps" hidden>
         <li data-q="0">Lining up the card</li>
@@ -1007,6 +1009,7 @@ function otsu(vals){
   return thr;
 }
 // Returns the card as a rotated rectangle in the source's own pixels, or null.
+window.SlabDetect=(src)=>detectCard(src);
 function detectCard(src){
   const {d,w,h,sc}=pixels(src,380);const N=w*h;
   const ring=Math.max(2,Math.round(Math.min(w,h)*0.03));const R=[],G=[],B=[];
@@ -1532,6 +1535,17 @@ async function runQuick(){
     st.textContent=e&&e.message==="photo"?"One of the photos couldn't be opened. Try a JPG or PNG.":($("#gradeStatus").hidden?"":$("#gradeStatus").textContent)||"Something went wrong while grading. Try again with clearer photos.";
   }finally{Q.running=false;S.quickMode=false}
 }
+document.addEventListener("click",e=>{
+  if(e.target.matches&&e.target.matches('input[type="file"]')&&e.target.dataset.bypass){delete e.target.dataset.bypass;return}
+  const up=e.target.closest("[data-upload]");
+  if(up){e.preventDefault();const [w,sd]=up.dataset.upload.split("-");const inp=$(w==="q"?"#qfile-"+sd:"#file-"+sd);if(inp){inp.dataset.bypass="1";inp.click()}return}
+  const t=e.target.closest("[data-livetap]");if(!t)return;
+  if(e.target.closest(".clear"))return;
+  if(!(window.SlabCam&&SlabCam.supported()))return; // fall back to the normal file picker
+  e.preventDefault();const [w,sd]=t.dataset.livetap.split("-");
+  if(w==="q")SlabCam.open(sd,f=>{if(Q[sd])URL.revokeObjectURL(Q[sd].url);Q[sd]={file:f,url:URL.createObjectURL(f)};qSlot(sd);runQuick()});
+  else SlabCam.open(sd,f=>openFramer(sd,f));
+},true);
 function bindQuick(){
   document.addEventListener("click",e=>{const t=e.target.closest("[data-qlive]");if(!t)return;const sd=t.dataset.qlive;
     if(!(window.SlabCam&&SlabCam.supported())){$("#qfile-"+sd).click();return}
