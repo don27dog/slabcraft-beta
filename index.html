@@ -726,9 +726,9 @@ input[type=range]{accent-color:var(--accent);width:100%}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="config.js?v=7"></script>
-<script src="shim.js?v=7"></script>
-<script src="livecam.js?v=7"></script>
+<script src="config.js?v=8"></script>
+<script src="shim.js?v=8"></script>
+<script src="livecam.js?v=8"></script>
 <script>
 (function(){
 "use strict";
@@ -919,7 +919,7 @@ async function acceptPhoto(p,framed){
   const side=FR.side;
   if(S[side])URL.revokeObjectURL(S[side].url);
   S[side]={blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h,file:FR.file,framed:!!framed};
-  S.touched[side]=false;dismissed[side]=false;S.tilt=S.tilt||{};S.tilt[side]=FR.tilt||0;
+  S.touched[side]=false;dismissed[side]=false;S.tilt=S.tilt||{};S.tilt[side]=FR.tilt||0;S.tiltLim=S.tiltLim||{};S.tiltLim[side]=tiltLimit(FR.file);
   if(framed){const mx=0.05/1.1,my=(CW*0.05)/(CH+CW*0.1);S.guides[side]={ol:mx,il:mx+.055,ir:1-mx-.055,or:1-mx,ot:my,it:my+.04,ib:1-my-.04,ob:1-my}}
   S.autoMeasured=S.autoMeasured||{};S.autoMeasured[side]=false;
   let innerFound=false;
@@ -1289,10 +1289,13 @@ function autoScanAfterPhoto(side){
 
 /* ---------- tilt check + perspective correction ---------- */
 function showTiltNote(){
-  const t=FR.tilt||0,rb=$("#frRetake");if(rb)rb.hidden=t<TILT_WARN;
-  if(t>=TILT_WARN){const n=$("#frNote");n.innerHTML=`<b style="color:var(--warn)">Phone was tilted.</b> ${esc(tiltMsg(t))}`}
+  const t=FR.tilt||0,lim=tiltLimit(FR.file),rb=$("#frRetake");if(rb)rb.hidden=t<lim;
+  if(t>=lim){const n=$("#frNote");n.innerHTML=`<b style="color:var(--warn)">Phone was tilted.</b> ${esc(tiltMsg(t))}`}
 }
 const TILT_WARN=0.05;
+// a photo the live camera took while the phone read level: small shape differences
+// come from measuring, not real tilt, so only warn about big ones
+function tiltLimit(file){const s=window.SlabLastShot;return s&&file&&file.name===s.name&&s.tilt!=null&&s.tilt<7?0.12:TILT_WARN}
 function orderQuad(r){
   let th=Math.PI/2-r.angle;while(th>Math.PI/2)th-=Math.PI;while(th<=-Math.PI/2)th+=Math.PI;
   const c=Math.cos(th),sn=Math.sin(th);
@@ -1361,7 +1364,7 @@ function renderCenterWarn(){
   const tl=S.tilt&&S.tilt[side]||0;
   const c=centering(S.guides[side]);const lr=Math.max(c.lr,100-c.lr),tb=Math.max(c.tb,100-c.tb);
   if(!S.touched[side]||(lr<WAY_OFF&&tb<WAY_OFF)){
-    if(tl>=TILT_WARN){box.innerHTML=`<div class="warnbox"><b>${side==="front"?"Front":"Back"} photo was tilted</b><span>${esc(tiltMsg(tl))}</span>${retakeButtons(side)}<div class="row"><button class="btn ghost" type="button" data-keep="${side}">Keep this photo</button></div></div>`}
+    if(tl>=(S.tiltLim&&S.tiltLim[side]||TILT_WARN)){box.innerHTML=`<div class="warnbox"><b>${side==="front"?"Front":"Back"} photo was tilted</b><span>${esc(tiltMsg(tl))}</span>${retakeButtons(side)}<div class="row"><button class="btn ghost" type="button" data-keep="${side}">Keep this photo</button></div></div>`}
     else box.innerHTML="";
     return}
   const which=lr>=tb?`${lr}/${100-lr} left to right`:`${tb}/${100-tb} top to bottom`;
@@ -1581,10 +1584,13 @@ function retakeBanner(r){
   ["front","back"].forEach(sd=>{
     const cs=r.subs.centering[sd]?r.subs.centering[sd].score:10;const limit=sd==="front"?6:5;
     const tl=S.tilt&&S.tilt[sd]||0;
-    if(sk[sd]||cs<=limit||tl>=TILT_WARN)out.push({sd,cs,skew:!!sk[sd]||tl>=TILT_WARN});
+    const tilted=tl>=(S.tiltLim&&S.tiltLim[sd]||TILT_WARN);
+    // a tilt or angle only matters here if it could have cost centering points
+    if(cs<=limit||((sk[sd]||tilted)&&cs<9))out.push({sd,cs,way:cs<=limit,skew:!!sk[sd]||tilted});
   });
   if(!out.length)return "";
-  return `<div class="warnbox"><b>Centering looks way off</b>${out.map(o=>`<span><b style="font-size:13px">${o.sd}</b> centering scored ${fmtG(o.cs)}${o.skew?" and the photo looks tilted or angled":""}. If the card wasn't flat and square in the shot, retake it and grade again.</span>${retakeButtons(o.sd)}`).join("")}</div>`;
+  const way=out.some(o=>o.way);
+  return `<div class="warnbox"><b>${way?"Centering looks way off":"Photo may have been angled"}</b>${out.map(o=>`<span><b style="font-size:13px">${o.sd}</b> centering scored ${fmtG(o.cs)}${o.skew?" and the photo looks tilted or angled":""}. If the card wasn't flat and square in the shot, retake it and grade again.</span>${retakeButtons(o.sd)}`).join("")}</div>`;
 }
 function renderResult(){
   const r=S.result,c=S.card;

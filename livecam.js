@@ -161,7 +161,9 @@ async function capture(auto){
   try{navigator.vibrate&&navigator.vibrate(60)}catch(_){}
   const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",.92));
   const t=tilt?tilt.t:null;close();
-  if(blob&&onPhoto)onPhoto(new File([blob],`${side}-${Date.now()}.jpg`,{type:"image/jpeg"}),{tilt:t,auto});
+  const f=blob&&new File([blob],`${side}-${Date.now()}.jpg`,{type:"image/jpeg"});
+  if(f)window.SlabLastShot={name:f.name,tilt:t,auto};
+  if(f&&onPhoto)onPhoto(f,{tilt:t,auto});
 }
 window.SlabCam={open,close,supported:()=>!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)};
 })();
