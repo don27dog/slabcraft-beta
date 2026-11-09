@@ -19,6 +19,20 @@ function betaCode(force){
   return c||"";
 }
 
+/* ---------- anonymous tester id + usage counts ---------- */
+function testerId(){
+  let t=LS.get("slabcraft.tid");
+  if(!t||t.length<8){const a=new Uint8Array(8);crypto.getRandomValues(a);t=Array.from(a,b=>b.toString(16).padStart(2,"0")).join("");LS.set("slabcraft.tid",t)}
+  return t;
+}
+function track(event){
+  try{
+    if(!CFG.serverUrl)return;
+    const h={"content-type":"application/json","x-tester-id":testerId()};const c=LS.get("slabcraft.betaCode");if(c)h["x-beta-code"]=c;
+    fetch(CFG.serverUrl.replace(/\/$/,"")+"/ping",{method:"POST",keepalive:true,headers:h,body:JSON.stringify({event})}).catch(()=>{});
+  }catch(_){}
+}
+
 /* ---------- images: shrink to save cost, send as base64 JPEG ---------- */
 async function toJpegB64(blob){
   const url=URL.createObjectURL(blob);
@@ -42,7 +56,7 @@ async function callAI(input,opts,wantJson,retried){
   let r;
   try{
     r=await fetch(CFG.serverUrl.replace(/\/$/,"")+"/ai",{method:"POST",signal:opts.signal,
-      headers:{"content-type":"application/json","x-beta-code":code},
+      headers:{"content-type":"application/json","x-beta-code":code,"x-tester-id":testerId()},
       body:JSON.stringify({prompt,images,json:!!wantJson,tier:opts.modelTier||"default"})});
   }catch(e){if(e&&e.name==="AbortError")throw err("cancelled");throw err("upstream_error","Can't reach the SlabCraft server")}
   let data={};try{data=await r.json()}catch(_){}
@@ -80,7 +94,7 @@ function collection(col){
   return {path:col,
     doc(id){id=id||("d"+Date.now().toString(36)+Math.random().toString(36).slice(2,6));return {id,path:col+"/"+id,
       async get(){const v=(store[col]||{})[id];return {id,exists:!!v,data:()=>v,metadata:{fromCache:false,hasPendingWrites:false}}},
-      async set(data){const prev=JSON.stringify(store[col]||{});store[col]=store[col]||{};store[col][id]=JSON.parse(JSON.stringify(data));try{persist()}catch(e){store[col]=JSON.parse(prev);throw e}emit(col)},
+      async set(data){const prev=JSON.stringify(store[col]||{});store[col]=store[col]||{};store[col][id]=JSON.parse(JSON.stringify(data));try{persist()}catch(e){store[col]=JSON.parse(prev);throw e}emit(col);if(data&&data.kind==="card")track("vault_save")},
       async update(data){if(!(store[col]||{})[id])throw err("invalid_argument");Object.assign(store[col][id],data);persist();emit(col)},
       async delete(){if(store[col]){delete store[col][id];persist();emit(col)}}}},
     onSnapshot(next){const a=listeners.get(col)||[];a.push(next);listeners.set(col,a);setTimeout(()=>next(snap(col)),0);return ()=>{listeners.set(col,(listeners.get(col)||[]).filter(f=>f!==next))}},
@@ -92,7 +106,7 @@ const db={collection,doc(p){const i=p.lastIndexOf("/");return collection(p.slice
 const downloads={async save({filename,data}){
   const blob=data instanceof Blob?data:new Blob([data]);const url=URL.createObjectURL(blob);
   const a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),4000);return {status:"saved"};
+  setTimeout(()=>URL.revokeObjectURL(url),4000);track("download");return {status:"saved"};
 }};
 
 /* ---------- who's viewing ---------- */
@@ -100,4 +114,5 @@ const user={async id(){return "local"},isOwner:()=>true,canEdit:()=>true,can:()=
 
 const caps={sample,db,downloads,user};
 window.claude={use:async name=>caps[name]||null};
+track("open");
 })();
