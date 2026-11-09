@@ -726,9 +726,9 @@ input[type=range]{accent-color:var(--accent);width:100%}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="config.js?v=6"></script>
-<script src="shim.js?v=6"></script>
-<script src="livecam.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="shim.js?v=7"></script>
+<script src="livecam.js?v=7"></script>
 <script>
 (function(){
 "use strict";
@@ -875,7 +875,8 @@ async function openFramer(side,file){
   const fl=await straighten(FR.img,r0);
   if(fl){FR.img=fl.img;FR.flatUrl&&URL.revokeObjectURL(FR.flatUrl);FR.flatUrl=fl.url;FR.tilt=fl.tilt}
   resetFramer();$("#framer").hidden=false;
-  if(!autoCenter())await aiFindEdges();
+  if(fl&&fl.rect){applyRect(fl.rect);$("#frNote").textContent="Card found, straightened and centered. Check it sits on the green frame, then tap Use photo."}
+  else if(!autoCenter())await aiFindEdges();
   showTiltNote();$("#frUse").focus();
 }
 function resetFramer(){
@@ -917,12 +918,12 @@ function closeFramer(){$("#framer").hidden=true;if(FR.url){URL.revokeObjectURL(F
 async function acceptPhoto(p,framed){
   const side=FR.side;
   if(S[side])URL.revokeObjectURL(S[side].url);
-  S[side]={blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h,file:FR.file};
+  S[side]={blob:p.blob,url:URL.createObjectURL(p.blob),w:p.w,h:p.h,file:FR.file,framed:!!framed};
   S.touched[side]=false;dismissed[side]=false;S.tilt=S.tilt||{};S.tilt[side]=FR.tilt||0;
   if(framed){const mx=0.05/1.1,my=(CW*0.05)/(CH+CW*0.1);S.guides[side]={ol:mx,il:mx+.055,ir:1-mx-.055,or:1-mx,ot:my,it:my+.04,ib:1-my-.04,ob:1-my}}
   S.autoMeasured=S.autoMeasured||{};S.autoMeasured[side]=false;
   let innerFound=false;
-  if(p.canvas){try{const m=autoMeasure(p.canvas);if(m){Object.assign(S.guides[side],m.g);
+  if(p.canvas){try{const m=autoMeasure(p.canvas,framed);if(m){Object.assign(S.guides[side],m.g);
     if(m.inner){S.touched[side]=true;S.autoMeasured[side]="auto";
       const c=centering(S.guides[side]);const dev=Math.max(Math.abs(50-c.lr),Math.abs(50-c.tb));
       const lim=side==="front"?15:30; // looks way off? double-check with the AI before trusting it
@@ -1045,19 +1046,92 @@ function detectCard(src){
     bestN=0;for(let k=0;k<N;k++){if(!out[k]){lab[k]=bestId;bestN++}}}
   let mx=0,my=0;for(let k=0;k<N;k++)if(lab[k]===bestId){mx+=k%w;my+=(k/w)|0}mx/=bestN;my/=bestN;
   let sxx=0,syy=0,sxy=0;for(let k=0;k<N;k++)if(lab[k]===bestId){const dx=k%w-mx,dy=((k/w)|0)-my;sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy}
-  const a=0.5*Math.atan2(2*sxy,sxx-syy);const ca=Math.cos(a),sa=Math.sin(a);
+  let a=0.5*Math.atan2(2*sxy,sxx-syy);
+  // the principal axis wobbles when the picture's colours are uneven; settle the angle
+  // by finding the tightest-fitting box within a few degrees of it
+  {const xs=[],ys=[],stride=Math.max(1,Math.floor(bestN/6000));for(let k=0,t=0;k<N;k++)if(lab[k]===bestId&&(t++%stride)===0){xs.push(k%w-mx);ys.push(((k/w)|0)-my)}
+    const n=xs.length,pu=new Float32Array(n),pv=new Float32Array(n);
+    const area=t=>{const c=Math.cos(t),s=Math.sin(t);for(let i=0;i<n;i++){pu[i]=xs[i]*c+ys[i]*s;pv[i]=-xs[i]*s+ys[i]*c}
+      pu.sort();pv.sort();return (pct(pu,.996)-pct(pu,.004))*(pct(pv,.996)-pct(pv,.004))};
+    let best=area(a),bt=a;const R=Math.PI/180;
+    for(let dg=-6;dg<=6;dg+=1){if(!dg)continue;const t=a+dg*R,ar=area(t);if(ar<best-1e-6){best=ar;bt=t}}
+    const b0=bt;for(const dg of [-.5,.5]){const t=b0+dg*R,ar=area(t);if(ar<best-1e-6){best=ar;bt=t}}
+    a=bt}
+  const ca=Math.cos(a),sa=Math.sin(a);
   const U=new Float32Array(bestN),V=new Float32Array(bestN);let j=0;
   const ext=[-1e9,-1e9,-1e9,-1e9],EP=[[0,0],[0,0],[0,0],[0,0]];
   for(let k=0;k<N;k++)if(lab[k]===bestId){const x0=k%w,y0=(k/w)|0,dx=x0-mx,dy=y0-my,u=dx*ca+dy*sa,v=-dx*sa+dy*ca;U[j]=u;V[j]=v;j++;
     const sc4=[u+v,u-v,-u+v,-u-v];for(let q=0;q<4;q++)if(sc4[q]>ext[q]){ext[q]=sc4[q];EP[q]=[x0,y0]}}
   U.sort();V.sort();const u0=pct(U,.004),u1=pct(U,.996),v0=pct(V,.004),v1=pct(V,.996);
-  const L=u1-u0,S2=v1-v0;const uc=(u0+u1)/2,vc=(v0+v1)/2;
-  const cx=mx+uc*ca-vc*sa,cy=my+uc*sa+vc*ca;
+  let L=u1-u0,S2=v1-v0;const uc=(u0+u1)/2,vc=(v0+v1)/2;
+  let cx=mx+uc*ca-vc*sa,cy=my+uc*sa+vc*ca;
   const ratio=Math.max(L,S2)/Math.max(1,Math.min(L,S2));
   if(ratio<1.1||ratio>1.9)return null;
   // fill check: a card is a solid rectangle
   if(bestN/(L*S2)<0.6)return null;
-  return {cx:cx/sc,cy:cy/sc,major:L/sc,minor:S2/sc,angle:a,quad:EP.map(([x0,y0])=>({x:(x0+.5)/sc,y:(y0+.5)/sc}))};
+  let quad=EP.map(([x0,y0])=>({x:(x0+.5)/sc,y:(y0+.5)/sc}));
+  // A white-bordered card on a light table: only the picture stands out, so what we
+  // found may be the picture, not the card. Look just outside each side for a
+  // matching border band that ends in a (faint) step to the table, and grow to it.
+  try{const ex=expandToBorder(src,{cx:cx/sc,cy:cy/sc,L:L/sc,S:S2/sc,ca,sa,quad});
+    if(ex){cx=ex.cx*sc;cy=ex.cy*sc;L=ex.L*sc;S2=ex.S*sc;quad=ex.quad}}catch(_){}
+  return {cx:cx/sc,cy:cy/sc,major:L/sc,minor:S2/sc,angle:a,quad};
+}
+function expandToBorder(src,r){
+  // r in full-image pixels: centre, L along (ca,sa), S along (-sa,ca)
+  const {d,w,h,sc}=pixels(src,900);
+  const px=(x,y)=>{x=Math.max(0,Math.min(w-1,x|0));y=Math.max(0,Math.min(h-1,y|0));const i=(y*w+x)*4;return [d[i],d[i+1],d[i+2]]};
+  const dist=(a,b)=>(Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2]))/3;
+  const med=a=>{a.sort((p,q)=>p-q);return a[a.length>>1]};
+  const cx=r.cx*sc,cy=r.cy*sc,hu=r.L*sc/2,hv=r.S*sc/2,U=[r.ca,r.sa],V=[-r.sa,r.ca];
+  const short=Math.min(hu,hv)*2;
+  // side: normal n, tangent t, distance to edge he, half length hl
+  const sides=[{n:U,t:V,he:hu,hl:hv},{n:[-U[0],-U[1]],t:V,he:hu,hl:hv},{n:V,t:U,he:hv,hl:hu},{n:[-V[0],-V[1]],t:U,he:hv,hl:hu}];
+  const prof=(sd,k)=>{const R=[],G=[],B=[];const bx=cx+sd.n[0]*(sd.he+k),by=cy+sd.n[1]*(sd.he+k);
+    for(let s=-sd.hl*.6;s<=sd.hl*.6;s+=1.5){const c=px(bx+sd.t[0]*s,by+sd.t[1]*s);R.push(c[0]);G.push(c[1]);B.push(c[2])}
+    return [med(R),med(G),med(B)]};
+  const kMin=Math.max(2,short*.012),kMax=short*.16;
+  const side=(sd,start=0)=>{
+    const P=[];for(let k=start+1;k<=start+kMax+6;k+=1)P.push(prof(sd,k));
+    const band=[0,1,2].map(c=>(P[0][c]+P[1][c]+P[2][c])/3);
+    // where the colour moves at least halfway from the border band to the table
+    // (edges are a little soft when the phone was tilted, so allow a ramp)
+    const D=P.map(c=>dist(c,band));let peak=0;for(let i=Math.ceil(kMin);i<D.length;i++)peak=Math.max(peak,D[i]);
+    if(peak<6)return null;
+    let step=-1;for(let i=Math.ceil(kMin);i<D.length-1;i++){if(D[i]>=peak*.5&&D[i+1]>=peak*.5){step=i;break}}
+    if(step<0||step>kMax)return null;
+    // a card-stock border: light and fairly neutral
+    const lum=(band[0]+band[1]+band[2])/3,sat=Math.max(...band)-Math.min(...band);
+    if(lum<150||sat>45)return null;
+    // ...and clearly unlike what's just inside (the picture)
+    return {k:start+step+.5,band,edge:start>0||dist(prof(sd,-short*.03),band)>=18};
+  };
+  let res=sides.map(side);
+  // (light falls unevenly, so compare tint more strictly than brightness)
+  const tint=c=>{const m=(c[0]+c[1]+c[2])/3;return [c[0]-m,c[1]-m,c[2]-m,m]};
+  const same=(x,y)=>{const a=tint(x.band),b=tint(y.band);return Math.abs(a[3]-b[3])<=45&&Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2])<=14};
+  // drop a side whose band doesn't match the others (picture or shadow got in the way)
+  res=res.map((r,i)=>r&&res.filter((o,j)=>j!==i&&o&&same(r,o)).length>=2?r:null);
+  if(res.filter(Boolean).length<3||res.filter(r=>r&&r.edge).length<2)return null;
+  // a side we couldn't read borrows the opposite side's width (autoMeasure refines it later)
+  // a side that starts inside the picture: walk out to the border band and read it from there
+  const good=res.filter(Boolean);const ref=good[0].band;
+  res=res.map((r,i)=>{if(r)return r;
+    for(let k=2;k<kMax;k+=1){const c=prof(sides[i],k);const m=(c[0]+c[1]+c[2])/3;
+      if(m>=150&&Math.max(...c)-Math.min(...c)<=45&&same({band:c},{band:ref})){const r2=side(sides[i],k);return r2&&same(r2,{band:ref})?r2:null}}
+    return null});
+  // still unreadable: borrow the opposite side's width (autoMeasure refines it later)
+  const opp=[1,0,3,2];res=res.map((r,i)=>r||{k:res[opp[i]].k});
+  const lop=(a,b)=>Math.max(a,b)/Math.max(.5,Math.min(a,b));
+  if(lop(res[0].k,res[1].k)>3||lop(res[2].k,res[3].k)>3)return null;
+  const du=(res[0].k-res[1].k)/2,dv=(res[2].k-res[3].k)/2;
+  const ncx=cx+U[0]*du+V[0]*dv,ncy=cy+U[1]*du+V[1]*dv;
+  const nhu=hu+(res[0].k+res[1].k)/2,nhv=hv+(res[2].k+res[3].k)/2;
+  // grow the found corners the same way, keeping any perspective (tilt) in their shape
+  const fu=nhu/hu,fv=nhv/hv;
+  const quad=r.quad.map(p=>{const dx=p.x*sc-cx,dy=p.y*sc-cy;const u=dx*U[0]+dy*U[1],v=dx*V[0]+dy*V[1];
+    const u2=u*fu+du,v2=v*fv+dv;return {x:(cx+U[0]*u2+V[0]*v2)/sc,y:(cy+U[1]*u2+V[1]*v2)/sc}});
+  return {cx:ncx/sc,cy:ncy/sc,L:nhu*2/sc,S:nhv*2/sc,quad};
 }
 function autoCenter(){
   const note=$("#frNote");let r=null;
@@ -1133,6 +1207,10 @@ Reply with only JSON: {"outer":{"left":0,"right":0,"top":0,"bottom":0},"inner":{
     const o=r&&r.outer||{},i=r&&r.inner;
     const g={ol:fr01(o.left),or:fr01(o.right),ot:fr01(o.top),ob:fr01(o.bottom)};
     if(Object.values(g).some(v=>v==null)||g.ol>=g.or||g.ot>=g.ob){st.className="status err";st.textContent="The AI couldn't measure this photo. Drag the lines by hand.";return}
+    // the card was placed on the frame, so the AI's card edges should land near it; if they
+    // don't, its border readings can't be trusted either
+    if(S[side].framed){const mx=0.05/1.1,my=(CW*0.05)/(CH+CW*0.1);
+      if(Math.abs(g.ol-mx)>.05||Math.abs(g.or-(1-mx))>.05||Math.abs(g.ot-my)>.05||Math.abs(g.ob-(1-my))>.05){st.className="status err";st.textContent="The AI's measurement didn't line up with the card, so the grader's own centering read is used. Drag the lines to measure by hand.";return}}
     if(i&&typeof i==="object"){g.il=fr01(i.left);g.ir=fr01(i.right);g.it=fr01(i.top);g.ib=fr01(i.bottom)}
     const innerOK=g.il!=null&&g.ir!=null&&g.it!=null&&g.ib!=null&&g.ol<=g.il&&g.il<g.ir&&g.ir<=g.or&&g.ot<=g.it&&g.it<g.ib&&g.ib<=g.ob;
     if(!innerOK){["il","ir","it","ib"].forEach(k=>delete g[k])}
@@ -1145,16 +1223,22 @@ Reply with only JSON: {"outer":{"left":0,"right":0,"top":0,"bottom":0},"inner":{
   finally{btn.disabled=false}
 }
 // After cropping: find the card's outer edges and the inside edge of its printed border.
-function autoMeasure(canvas){
+function autoMeasure(canvas,framed){
   // Measures the card's outer edges and the inside edge of its printed border.
   // Works on averaged colour profiles across the middle of each side, so small
   // design details, glare spots and noise don't throw it off.
   const {d,w,h}=pixels(canvas,760);
-  const r=detectCard(canvas);if(!r)return null;
-  const sc=w/canvas.width;const cx=r.cx*sc,cy=r.cy*sc;
-  const vert=Math.abs(Math.sin(r.angle))>Math.abs(Math.cos(r.angle));
-  const hw=(vert?r.minor:r.major)*sc/2,hh=(vert?r.major:r.minor)*sc/2;
-  let ol=cx-hw,or=cx+hw,ot=cy-hh,ob=cy+hh;
+  let r=null;try{r=detectCard(canvas)}catch(_){}
+  // a framed photo has the card placed on the frame already: start from there unless
+  // the detector agrees closely (it can mistake the picture for the card on light tables)
+  const fb=framed?{ol:w*0.05/1.1,or:w*(1-0.05/1.1),ot:h*(CW*0.05)/(CH+CW*0.1),ob:h*(1-(CW*0.05)/(CH+CW*0.1))}:null;
+  if(!r&&!fb)return null;
+  let ol,or,ot,ob;
+  if(r){const sc=w/canvas.width;const cx=r.cx*sc,cy=r.cy*sc;
+    const vert=Math.abs(Math.sin(r.angle))>Math.abs(Math.cos(r.angle));
+    const hw=(vert?r.minor:r.major)*sc/2,hh=(vert?r.major:r.minor)*sc/2;
+    ol=cx-hw;or=cx+hw;ot=cy-hh;ob=cy+hh}
+  if(fb&&(!r||Math.abs(ol-fb.ol)>w*.03||Math.abs(or-fb.or)>w*.03||Math.abs(ot-fb.ot)>h*.03||Math.abs(ob-fb.ob)>h*.03)){({ol,or,ot,ob}=fb)}
   const px=(x,y)=>{x=Math.max(0,Math.min(w-1,x|0));y=Math.max(0,Math.min(h-1,y|0));const i=(y*w+x)*4;return [d[i],d[i+1],d[i+2]]};
   const dist=(a,b)=>(Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2]))/3;
   // typical (median) colour at distance k from an edge, across the middle 60% of that side.
@@ -1251,7 +1335,9 @@ async function flattenCard(img,quad){
     o[oi+3]=255}}
   ox.putImageData(od,0,0);
   const blob=await new Promise(r=>oc.toBlob(r,"image/jpeg",.93));const url=URL.createObjectURL(blob);
-  const out=await loadImage(url);return {img:out,url};
+  const out=await loadImage(url);
+  // where the card sits in the straightened picture (it is placed there exactly)
+  return {img:out,url,rect:{cx:W/2,cy:H/2,major:ch,minor:cw,angle:Math.PI/2,quad:[{x:pad,y:pad},{x:pad+cw,y:pad},{x:pad+cw,y:pad+ch},{x:pad,y:pad+ch}]}};
 }
 async function straighten(img,r){
   // r: a found card (from detectCard or the AI). Returns {img,url,tilt} or null.
@@ -1435,7 +1521,7 @@ function buildResult(raw){
       const alr=parseRatio(rs.centering.lr),atb=parseRatio(rs.centering.tb);
       if(src!=="your measurement"&&alr!=null&&atb!=null){
         const off=(m,a)=>Math.abs(Math.abs(50-m)-Math.abs(50-a));
-        if(off(lr,alr)>10||off(tb,atb)>10){lr=(lr+alr)/2;tb=(tb+atb)/2;src="blend of the measurement and the AI's estimate, which disagreed. Check the centering lines"}}}
+        if(off(lr,alr)>10||off(tb,atb)>10){const mix=(m,a)=>50+Math.sign(m-50||1)*(Math.abs(m-50)+Math.abs(a-50))/2;lr=mix(lr,alr);tb=mix(tb,atb);src="blend of the measurement and the AI's estimate, which disagreed. Check the centering lines"}}}
     else{lr=parseRatio(rs.centering.lr);tb=parseRatio(rs.centering.tb)}
     const have=lr!=null&&tb!=null;const SX=STRICT[raw.example?"standard":(S.strict||"standard")];
     const sc=v=>50+(v-50)*SX.dev;
@@ -1538,8 +1624,7 @@ async function quickPrep(side,file){
   let r=null;try{r=detectCard(img)}catch(_){}
   if(!r&&S.sample&&S.imagesOK){try{r=await aiCornerRect(img)}catch(_){r=null}}
   const fl=await straighten(img,r);
-  if(fl){FR.img=fl.img;FR.tilt=fl.tilt;resetFramer();let r2=null;try{r2=detectCard(fl.img)}catch(_){}
-    r=r2||{cx:fl.img.naturalWidth/2,cy:fl.img.naturalHeight/2,major:fl.img.naturalHeight/1.12,minor:fl.img.naturalWidth/1.12,angle:Math.PI/2}}
+  if(fl){FR.img=fl.img;FR.tilt=fl.tilt;resetFramer();r=fl.rect}
   if(r)applyRect(r);
   const p=await framerExport();
   return {p,framed:!!r};
@@ -1637,7 +1722,11 @@ async function slabCanvas(side){
   const cw=560,ch=784,cx=(W-cw)/2,cy=ry+40;
   x.fillStyle="rgba(40,52,66,.10)";rr(cx-16,cy-16,cw+32,ch+32,14);x.fill();x.strokeStyle="rgba(96,108,122,.45)";x.lineWidth=2;x.stroke();
   const ph=S[side];
-  if(ph){try{const im=await imgOf(ph.url);const gd=S.guides[side];const sx=gd.ol*im.naturalWidth,sy=gd.ot*im.naturalHeight,sw=(gd.or-gd.ol)*im.naturalWidth,sh=(gd.ob-gd.ot)*im.naturalHeight;
+  if(ph){try{const im=await imgOf(ph.url);let gd=S.guides[side];
+    // if the measured edges don't make a card-shaped box, fall back to the frame the card was placed on
+    {const ar=((gd.or-gd.ol)*im.naturalWidth)/Math.max(1,(gd.ob-gd.ot)*im.naturalHeight);
+      if(Math.abs(ar-5/7)/(5/7)>.06){const mx=0.05/1.1,my=(CW*0.05)/(CH+CW*0.1);gd={ol:mx,or:1-mx,ot:my,ob:1-my}}}
+    const sx=gd.ol*im.naturalWidth,sy=gd.ot*im.naturalHeight,sw=(gd.or-gd.ol)*im.naturalWidth,sh=(gd.ob-gd.ot)*im.naturalHeight;
     x.save();x.shadowColor="rgba(0,0,0,.35)";x.shadowBlur=18;x.shadowOffsetY=6;x.drawImage(im,sx,sy,sw,sh,cx,cy,cw,ch);x.restore()}catch(_){}}
   else{x.fillStyle="#d0d6dc";x.fillRect(cx,cy,cw,ch)}
   // glare

@@ -15,7 +15,7 @@ const SOFT_HOLD_MS=1800; // hold time when only roughly level
 const GRACE_MS=700;      // one missed check doesn't restart the countdown
 const CHECK_MS=250;      // how often to look for the card
 let stream=null,raf=0,onPhoto=null,side="front",tilt=null,goodSince=0,taken=false,orientSeen=false,orientTimer=0;
-let lastCheck=0,card=null,align=null,lastGood=0,sm=null;const small=document.createElement("canvas");
+let lastCheck=0,card=null,align=null,lastGood=0,sm=null,lostSince=0;const small=document.createElement("canvas");
 
 function html(){
   if($("#cam"))return;
@@ -43,7 +43,7 @@ function onOrient(e){
   tilt={b:sm.b,g:sm.g,t:Math.hypot(sm.b,sm.g)};
 }
 async function open(s,cb){
-  html();side=s;onPhoto=cb;taken=false;goodSince=0;tilt=null;orientSeen=false;card=null;align=null;lastGood=0;sm=null;
+  html();side=s;onPhoto=cb;taken=false;goodSince=0;tilt=null;orientSeen=false;card=null;align=null;lastGood=0;sm=null;lostSince=0;
   $("#camTitle").textContent=s==="back"?"Back of card":"Front of card";
   $("#camMsg").textContent="Line the card up with the frame";
   // iPhone asks permission for the level; this must happen on the tap
@@ -79,7 +79,9 @@ function checkAlignment(W,H){
   const sw=360,sh=Math.round(sw*v.videoHeight/v.videoWidth);small.width=sw;small.height=sh;
   small.getContext("2d",{willReadFrequently:true}).drawImage(v,0,0,sw,sh);
   let r=null;try{r=window.SlabDetect(small)}catch(_){r=null}
-  if(!r){card=null;align={ok:false,msg:"Line the card up with the frame"};return}
+  if(!r){card=null;if(!lostSince)lostSince=performance.now();
+    align={ok:false,msg:performance.now()-lostSince>3000?"Can't see the card's edges. Try a darker, plain surface":"Line the card up with the frame"};return}
+  lostSince=0;
   const m=v2o(v,W,H),k=v.videoWidth/sw;
   const cx=m.ox+r.cx*k*m.sc,cy=m.oy+r.cy*k*m.sc,maj=r.major*k*m.sc,min=r.minor*k*m.sc;
   // angle of the long side away from vertical, in degrees
