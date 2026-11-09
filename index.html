@@ -726,9 +726,9 @@ input[type=range]{accent-color:var(--accent);width:100%}
 </div>
 <div class="toast" id="toast" hidden></div>
 
-<script src="config.js?v=3"></script>
-<script src="shim.js?v=3"></script>
-<script src="livecam.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="shim.js?v=4"></script>
+<script src="livecam.js?v=4"></script>
 <script>
 (function(){
 "use strict";
@@ -922,7 +922,11 @@ async function acceptPhoto(p,framed){
   if(framed){const mx=0.05/1.1,my=(CW*0.05)/(CH+CW*0.1);S.guides[side]={ol:mx,il:mx+.055,ir:1-mx-.055,or:1-mx,ot:my,it:my+.04,ib:1-my-.04,ob:1-my}}
   S.autoMeasured=S.autoMeasured||{};S.autoMeasured[side]=false;
   let innerFound=false;
-  if(p.canvas){try{const m=autoMeasure(p.canvas);if(m){Object.assign(S.guides[side],m.g);if(m.inner){S.touched[side]=true;S.autoMeasured[side]="auto";innerFound=true}}}catch(e){}}
+  if(p.canvas){try{const m=autoMeasure(p.canvas);if(m){Object.assign(S.guides[side],m.g);
+    if(m.inner){S.touched[side]=true;S.autoMeasured[side]="auto";
+      const c=centering(S.guides[side]);const dev=Math.max(Math.abs(50-c.lr),Math.abs(50-c.tb));
+      const lim=side==="front"?15:30; // looks way off? double-check with the AI before trusting it
+      innerFound=m.conf==="high"&&dev<=lim}}}catch(e){}}
   renderSlot(side);setSide(side);closeFramer();S.insp.side=side;renderInspector();
   const regradeAfter=S.retakeSide===side&&!S.isExample&&!!S.raw;if(S.retakeSide===side)S.retakeSide=null;
   return (async()=>{if(!innerFound&&S.sample&&S.imagesOK){try{await aiMeasure()}catch(_){}}
@@ -1032,6 +1036,13 @@ function detectCard(src){
     if(cnt>bestN){bestN=cnt;bestId=id}
   }
   if(bestN<N*0.04||bestN>N*0.97)return null;
+  // fill holes: dark artwork inside a light border can look like background,
+  // so everything the outside surface can't reach counts as card too
+  {const out=new Uint8Array(N);let qh=0,qt=0;
+    const push=k=>{if(!out[k]&&lab[k]!==bestId){out[k]=1;q[qt++]=k}};
+    for(let x=0;x<w;x++){push(x);push((h-1)*w+x)}for(let y=0;y<h;y++){push(y*w);push(y*w+w-1)}
+    while(qh<qt){const p=q[qh++];const x=p%w,y=(p/w)|0;if(x>0)push(p-1);if(x<w-1)push(p+1);if(y>0)push(p-w);if(y<h-1)push(p+w)}
+    bestN=0;for(let k=0;k<N;k++){if(!out[k]){lab[k]=bestId;bestN++}}}
   let mx=0,my=0;for(let k=0;k<N;k++)if(lab[k]===bestId){mx+=k%w;my+=(k/w)|0}mx/=bestN;my/=bestN;
   let sxx=0,syy=0,sxy=0;for(let k=0;k<N;k++)if(lab[k]===bestId){const dx=k%w-mx,dy=((k/w)|0)-my;sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy}
   const a=0.5*Math.atan2(2*sxy,sxx-syy);const ca=Math.cos(a),sa=Math.sin(a);
@@ -1135,34 +1146,54 @@ Reply with only JSON: {"outer":{"left":0,"right":0,"top":0,"bottom":0},"inner":{
 }
 // After cropping: find the card's outer edges and the inside edge of its printed border.
 function autoMeasure(canvas){
-  const {d,w,h}=pixels(canvas,520);
+  // Measures the card's outer edges and the inside edge of its printed border.
+  // Works on averaged colour profiles across the middle of each side, so small
+  // design details, glare spots and noise don't throw it off.
+  const {d,w,h}=pixels(canvas,760);
   const r=detectCard(canvas);if(!r)return null;
   const sc=w/canvas.width;const cx=r.cx*sc,cy=r.cy*sc;
   const vert=Math.abs(Math.sin(r.angle))>Math.abs(Math.cos(r.angle));
   const hw=(vert?r.minor:r.major)*sc/2,hh=(vert?r.major:r.minor)*sc/2;
-  const ol=cx-hw,or=cx+hw,ot=cy-hh,ob=cy+hh;
-  const px=(x,y)=>{x=Math.max(0,Math.min(w-1,Math.round(x)));y=Math.max(0,Math.min(h-1,Math.round(y)));const i=(y*w+x)*4;return [d[i],d[i+1],d[i+2]]};
-  const cd=(a,b)=>(Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2]))/3;
-  // scan inward from an edge along many lines; return median distance to the first strong colour change
-  const scan=(start,dirX,dirY,across,lo,hi,maxDepth)=>{
-    const hits=[];
-    for(let t=0;t<24;t++){
-      const a=lo+(hi-lo)*(0.25+0.5*t/23);
-      const inset=Math.max(2,maxDepth*0.08);
-      const at=dd=>dirX?px(start+dirX*dd,a):px(a,start+dirY*dd);
-      const ref=[0,0,0];for(let k=0;k<3;k++){const c=at(inset+k);ref[0]+=c[0]/3;ref[1]+=c[1]/3;ref[2]+=c[2]/3}
-      for(let dd=inset+3;dd<maxDepth;dd++){if(cd(at(dd),ref)>38&&cd(at(dd+1),ref)>38){hits.push(dd);break}}
-    }
-    if(hits.length<12)return null;
-    hits.sort((p,q)=>p-q);const m=hits[hits.length>>1];const iqr=hits[Math.floor(hits.length*.75)]-hits[Math.floor(hits.length*.25)];
-    return iqr<=maxDepth*0.12?m:null;
+  let ol=cx-hw,or=cx+hw,ot=cy-hh,ob=cy+hh;
+  const px=(x,y)=>{x=Math.max(0,Math.min(w-1,x|0));y=Math.max(0,Math.min(h-1,y|0));const i=(y*w+x)*4;return [d[i],d[i+1],d[i+2]]};
+  const dist=(a,b)=>(Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1])+Math.abs(a[2]-b[2]))/3;
+  // typical (median) colour at distance k from an edge, across the middle 60% of that side.
+  // The median ignores names, logos and glare that cover only part of the line.
+  const med=a=>{a.sort((p,q)=>p-q);return a[a.length>>1]};
+  const prof=(side,k)=>{
+    const R=[],G=[],B=[];
+    if(side==="l"||side==="r"){const x=side==="l"?ol+k:or-k;for(let y=ot+(ob-ot)*.2;y<=ob-(ob-ot)*.2;y+=1.5){const c=px(x,y);R.push(c[0]);G.push(c[1]);B.push(c[2])}}
+    else{const y=side==="t"?ot+k:ob-k;for(let x=ol+(or-ol)*.2;x<=or-(or-ol)*.2;x+=1.5){const c=px(x,y);R.push(c[0]);G.push(c[1]);B.push(c[2])}}
+    return [med(R),med(G),med(B)];
   };
-  const W=or-ol,H=ob-ot;
-  const l=scan(ol,1,0,true,ot,ob,W*0.25),rr=scan(or,-1,0,true,ot,ob,W*0.25),t=scan(ot,0,1,false,ol,or,H*0.2),b=scan(ob,0,-1,false,ol,or,H*0.2);
+  // 1) sharpen each outer edge: strongest change between background and card stock
+  const refineOuter=side=>{
+    const span=Math.max(4,((side==="l"||side==="r")?(or-ol):(ob-ot))*.03);let best=0,bk=0;
+    for(let k=-span;k<=span;k+=.5){const g=dist(prof(side,k-1.5),prof(side,k+1.5));if(g>best){best=g;bk=k}}
+    return bk;
+  };
+  const dl=refineOuter("l"),dr=refineOuter("r"),dt=refineOuter("t"),db=refineOuter("b");
+  ol+=dl;or-=dr;ot+=dt;ob-=db;
+  // 2) inner border edge: first place the colour clearly leaves the border colour
+  const findInner=side=>{
+    const dim=(side==="l"||side==="r")?(or-ol):(ob-ot);const cross=(side==="l"||side==="r")?(ob-ot):(or-ol);
+    const maxK=dim*((side==="l"||side==="r")?.24:.2),k0=Math.max(2,cross*.012),k1=Math.max(k0+2,cross*.028);
+    const ref=[0,0,0];let n=0;for(let k=k0;k<=k1;k+=.5){const c=prof(side,k);ref[0]+=c[0];ref[1]+=c[1];ref[2]+=c[2];n++}ref[0]/=n;ref[1]/=n;ref[2]/=n;
+    const D=[];for(let k=k1;k<=maxK;k+=.5)D.push([k,dist(prof(side,k),ref)]);
+    const peak=Math.max(...D.map(v=>v[1]));if(peak<22)return null;
+    const thr=Math.max(16,peak*.5);
+    for(let i=0;i<D.length-2;i++){if(D[i][1]>=thr&&D[i+1][1]>=thr&&D[i+2][1]>=thr*.8){
+      const a=i>0?D[i-1]:D[i],b=D[i];const f=b[1]===a[1]?0:(thr-a[1])/(b[1]-a[1]);
+      return {k:a[0]+(b[0]-a[0])*Math.max(0,Math.min(1,f)),peak}}}
+    return null;
+  };
+  const L=findInner("l"),R=findInner("r"),T=findInner("t"),B=findInner("b");
   const g={ol:ol/w,or:or/w,ot:ot/h,ob:ob/h};
-  const inner=l!=null&&rr!=null&&t!=null&&b!=null;
-  if(inner){g.il=(ol+l)/w;g.ir=(or-rr)/w;g.it=(ot+t)/h;g.ib=(ob-b)/h}
-  return {g,inner};
+  const inner=!!(L&&R&&T&&B);
+  let conf="low";
+  if(inner){g.il=(ol+L.k)/w;g.ir=(or-R.k)/w;g.it=(ot+T.k)/h;g.ib=(ob-B.k)/h;
+    conf=Math.min(L.peak,R.peak,T.peak,B.peak)>=30?"high":"low"}
+  return {g,inner,conf};
 }
 
 /* ---------- automatic AI scan after each photo ---------- */
@@ -1399,7 +1430,12 @@ function buildResult(raw){
   const rule=S.rule||"strict";const sides={},cinfo={},ded={};
   ["front","back"].forEach(sd=>{
     const rs=raw.sides[sd];let lr=null,tb=null,src="AI estimate";
-    if(!raw.example&&S[sd]&&S.touched[sd]){const c=centering(S.guides[sd]);lr=c.lr;tb=c.tb;src=S.autoMeasured&&S.autoMeasured[sd]==="ai"?"AI-measured":S.autoMeasured&&S.autoMeasured[sd]==="auto"?"auto-measured":"your measurement"}
+    if(!raw.example&&S[sd]&&S.touched[sd]){const c=centering(S.guides[sd]);lr=c.lr;tb=c.tb;src=S.autoMeasured&&S.autoMeasured[sd]==="ai"?"AI-measured":S.autoMeasured&&S.autoMeasured[sd]==="auto"?"auto-measured":"your measurement";
+      // automatic measurements are cross-checked with the grader's own read of the photo
+      const alr=parseRatio(rs.centering.lr),atb=parseRatio(rs.centering.tb);
+      if(src!=="your measurement"&&alr!=null&&atb!=null){
+        const off=(m,a)=>Math.abs(Math.abs(50-m)-Math.abs(50-a));
+        if(off(lr,alr)>10||off(tb,atb)>10){lr=(lr+alr)/2;tb=(tb+atb)/2;src="blend of the measurement and the AI's estimate, which disagreed. Check the centering lines"}}}
     else{lr=parseRatio(rs.centering.lr);tb=parseRatio(rs.centering.tb)}
     const have=lr!=null&&tb!=null;const SX=STRICT[raw.example?"standard":(S.strict||"standard")];
     const sc=v=>50+(v-50)*SX.dev;
